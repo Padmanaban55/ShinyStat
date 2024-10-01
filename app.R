@@ -52,6 +52,11 @@ ui <- fluidPage(
       uiOutput("group_var_select"),
       uiOutput("var_select"),
       
+      radioButtons("summary_stat", "Summary Statistics for Continuous Variables:",
+                   choices = list("Mean and Standard Deviation" = "mean_sd",
+                                  "Median and IQR" = "median_iqr"),
+                   selected = "mean_sd"),
+      
       # New UI element for paired tests
       radioButtons("test_type", "Test Type:",
                    choices = list(
@@ -66,23 +71,7 @@ ui <- fluidPage(
         uiOutput("id_var_select")
       ),
       
-      actionButton("toggle_override", "Show/Hide Override Options", class = "btn btn-secondary", style = "margin-bottom: 10px;"),
-      
-      hidden(
-        div(id = "override_section",  
-            tags$div(
-              style = "padding: 10px; background-color: #e9ecef; border-radius: 5px;",
-              checkboxGroupInput("continuous_override", "Select Continuous Variables (Override):", choices = NULL),
-              checkboxGroupInput("categorical_override", "Select Categorical Variables (Override):", choices = NULL)
-            )
-        )
-      ),
-      
-      radioButtons("summary_stat", "Summary Statistics for Continuous Variables:",
-                   choices = list("Mean and Standard Deviation" = "mean_sd",
-                                  "Median and IQR" = "median_iqr"),
-                   selected = "mean_sd"),
-      
+       
       # Updated test choices to include paired options
       radioButtons("test_choice", "Statistical Test for Comparisons:",
                    choices = list(
@@ -96,6 +85,27 @@ ui <- fluidPage(
                    selected = "t.test"),
       
       checkboxInput("add_pvalue", "Add p-value to the summary table", value = TRUE),
+      
+      actionButton("toggle_override", "Show/Hide Override Options", class = "btn btn-secondary", style = "margin-bottom: 10px;"),
+      
+            hidden(
+        div(id = "override_section",  
+            tags$div(
+              style = "padding: 10px; background-color: #e9ecef; border-radius: 5px;",
+              checkboxGroupInput("continuous_override", "Select Continuous Variables (Override):", choices = NULL),
+              checkboxGroupInput("categorical_override", "Select Categorical Variables (Override):", choices = NULL)
+            )
+        )
+      ),
+      
+      actionButton("toggle_labels", "Show/Hide Label Options", 
+                   class = "btn btn-secondary", style = "margin-top: 10px;"),
+      
+      hidden(
+        div(id = "label_options_section",
+            uiOutput("label_inputs")
+        )
+      ),
       
       h4("Correlation Matrix Options", style = "color: #007bff; margin-top: 20px;"),
       checkboxInput("correlation_matrix", "Generate Correlation Matrix", value = FALSE),
@@ -201,6 +211,38 @@ server <- function(input, output, session) {
     updateSelectInput(session, "dependent_var", choices = var_names)
     updateCheckboxGroupInput(session, "independent_vars", choices = var_names)
   })
+  
+  observeEvent(input$toggle_override, {
+    shinyjs::toggle("override_section")
+  })
+  
+  #####
+  # Create the label inputs UI
+  output$label_inputs <- renderUI({
+    req(dataset())
+    vars <- names(dataset())
+    
+    # Create a list of text inputs, one for each variable
+    label_inputs <- lapply(vars, function(var) {
+      textInput(
+        inputId = paste0("label_", gsub("[^[:alnum:]]", "_", var)),  # sanitize variable names
+        label = paste("Label for", var),
+        value = var
+      )
+    })
+    
+    # Return the list of inputs wrapped in a div
+    div(
+      style = "padding: 10px; background-color: #e9ecef; border-radius: 5px;",
+      label_inputs
+    )
+  })
+  
+  # Add observer for toggle_labels button
+  observeEvent(input$toggle_labels, {
+    shinyjs::toggle("label_options_section")
+  })
+  
 ##################################################################################################  
   #gt summary
   output$summary_table <- renderTable({
@@ -209,6 +251,14 @@ server <- function(input, output, session) {
     tryCatch({
       data <- dataset()
       print("Dataset loaded")
+      # Apply labels if they exist
+      for (var in names(data)) {
+        label_input_id <- paste0("label_", gsub("[^[:alnum:]]", "_", var))
+        if (!is.null(input[[label_input_id]])) {
+          attr(data[[var]], "label") <- input[[label_input_id]]
+        }
+      }
+      
       
       continuous_vars <- input$continuous_override
       categorical_vars <- input$categorical_override
@@ -590,6 +640,7 @@ server <- function(input, output, session) {
     # Reset all other inputs
     shinyjs::reset("sidebarPanel")
     
+    
     # Additional explicit resets for all inputs
     updateCheckboxInput(session, "show_preview", value = FALSE)
     updateCheckboxInput(session, "add_pvalue", value = TRUE)
@@ -613,6 +664,13 @@ server <- function(input, output, session) {
     updateCheckboxGroupInput(session, "independent_vars", choices = NULL, selected = NULL)
     updateCheckboxGroupInput(session, "cor_vars", choices = NULL, selected = NULL)
     
+    # Reset label inputs
+    vars <- names(dataset())
+    for (var in vars) {
+      updateTextInput(session, 
+                      inputId = paste0("label_", gsub("[^[:alnum:]]", "_", var)), 
+                      value = var)
+    }
     # Hide any sections that might be shown
     shinyjs::hide("override_section")
     shinyjs::hide("label_options_section")
