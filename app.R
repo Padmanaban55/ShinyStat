@@ -1,3 +1,4 @@
+
 # Load necessary libraries
 library(shiny)
 library(shinyjs)
@@ -45,12 +46,22 @@ ui <- fluidPage(
       fileInput("file", "Upload your data file (CSV, Excel, or SPSS)", 
                 accept = c(".csv", ".xls", ".xlsx", ".sav")),
       
-      # New checkbox to display data preview
+            # New checkbox to display data preview
       checkboxInput("show_preview", "Show Data Preview", value = FALSE),
       
       h4("gtsummary Table Options", style = "color: #007bff; margin-top: 20px;"),
       uiOutput("group_var_select"),
       uiOutput("var_select"),
+      fluidRow(
+        column(6,
+               actionButton("select_all_vars", "Select All", class = "btn btn-secondary btn-sm", 
+                            style = "width: 100%; margin-top: 5px;")
+        ),
+        column(6,
+               actionButton("unselect_all_vars", "Unselect All", class = "btn btn-secondary btn-sm", 
+                            style = "width: 100%; margin-top: 5px;")
+        )
+      ),
       
       radioButtons("summary_stat", "Summary Statistics for Continuous Variables:",
                    choices = list("Mean and Standard Deviation" = "mean_sd",
@@ -190,10 +201,25 @@ server <- function(input, output, session) {
   
   output$var_select <- renderUI({
     req(dataset())
-    checkboxGroupInput("vars", "Select Variables to Include in Table:", 
-                       choices = names(dataset()), 
-                       selected = names(dataset()))
+    tagList(
+      checkboxGroupInput("vars", "Select Variables to Include in Table:", 
+                         choices = names(dataset()), 
+                         selected = names(dataset()))
+    )
   })
+  
+  observeEvent(input$select_all_vars, {
+    req(dataset())
+    updateCheckboxGroupInput(session, "vars", 
+                             selected = names(dataset()))
+  })
+  
+  observeEvent(input$unselect_all_vars, {
+    req(dataset())
+    updateCheckboxGroupInput(session, "vars", 
+                             selected = character(0))
+  })
+  
   
   output$correlation_var_select <- renderUI({
     req(input$correlation_matrix)
@@ -663,6 +689,7 @@ server <- function(input, output, session) {
     updateCheckboxGroupInput(session, "categorical_override", choices = NULL, selected = NULL)
     updateCheckboxGroupInput(session, "independent_vars", choices = NULL, selected = NULL)
     updateCheckboxGroupInput(session, "cor_vars", choices = NULL, selected = NULL)
+    
     
     # Reset label inputs
     vars <- names(dataset())
