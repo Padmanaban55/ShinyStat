@@ -226,7 +226,7 @@ server <- function(input, output, session) {
     req(dataset())
     checkboxGroupInput("cor_vars", "Select Variables for Correlation Matrix:", 
                        choices = names(dataset()), 
-                       selected = names(dataset()))
+                       selected = "None")
   })
   
   observe({
@@ -271,7 +271,7 @@ server <- function(input, output, session) {
   
 ##################################################################################################  
   #gt summary
-  output$summary_table <- renderTable({
+ summary_table <- reactive({
     req(input$generate_gtsummary)
     
     tryCatch({
@@ -386,16 +386,22 @@ server <- function(input, output, session) {
       }
       
       print("Table created successfully")
-      return(as_tibble(table))
+      return(table)
     }, error = function(e) {
       print(paste("Error occurred:", e$message))
       return(data.frame(Error = paste("An error occurred:", e$message)))
     })
   })
   
+  # Output for summary table display
+  output$summary_table <- renderTable({
+    summary_table()
+  })
+  
+  
   ######################
   ######### Correlation
-  output$cor_matrix <- renderTable({
+  cor_matrix <- reactive({
     req(input$generate_correlation)
     req(input$correlation_matrix)
     data <- dataset()
@@ -449,8 +455,14 @@ server <- function(input, output, session) {
       return(cor_matrix_with_p(cor_data, method = input$correlation_type))
     }
   })
+  
+  # Output for correlation matrix display
+  output$cor_matrix <- renderTable({
+    cor_matrix()
+  })
+  
   ######################Regression
-  output$regression_results <- renderDT({
+  regression_results <- reactive({
     req(input$run_regression)
     
     tryCatch({
@@ -651,74 +663,134 @@ server <- function(input, output, session) {
     })
   })
   
+  # Output for regression results display
+  output$regression_results <- renderDT({
+    as.data.frame(regression_results())  # Display as data table
+  })
+ #####Download
+  
+  # Download handlers for summary table, correlation matrix, and regression results
+  output$download_summary <- downloadHandler(
+    filename = function() { paste("summary_table", Sys.Date(), ".html", sep = "") },
+    content = function(file) {
+      summary_table_html <- summary_table() %>%
+        as_gt() %>%
+        gt::as_raw_html()  # Convert to raw HTML content
+      
+      # Write the HTML content to a file
+      write(summary_table_html, file)
+    }
+  )
+  
+  
+  
+  
+  output$download_correlation <- downloadHandler(
+    filename = function() { paste("correlation_matrix", Sys.Date(), ".csv", sep = "") },
+    content = function(file) {
+      cor_matrix_data <- cor_matrix()
+      if (!is.null(cor_matrix_data)) {
+        write.csv(cor_matrix_data, file, row.names = FALSE)
+      }
+    }
+  )
+  
+  output$download_regression <- downloadHandler(
+    filename = function() { paste("regression_results", Sys.Date(), ".csv", sep = "") },
+    content = function(file) {
+      regression_results_data <- regression_results()
+      if (!is.null(regression_results_data)) {
+        write.csv(as.data.frame(regression_results_data), file, row.names = FALSE)
+      }
+    }
+  )
 
 ##############################  
   
   # Reset button 
   
+  # Update the reset button observer in your server function
   observeEvent(input$reset_btn, {
-    # Reset file input first
-    reset("file")
+    # Reset file input
+    #reset("file") #Muting file reset
     
     # Use invalidateLater to ensure this runs after the file input is reset
     invalidateLater(100)
     
     # Reset all other inputs
-    shinyjs::reset("sidebarPanel")
-    
-    
-    # Additional explicit resets for all inputs
     updateCheckboxInput(session, "show_preview", value = FALSE)
     updateCheckboxInput(session, "add_pvalue", value = TRUE)
     updateCheckboxInput(session, "correlation_matrix", value = FALSE)
+    updateCheckboxInput(session, "regression_toggle", value = FALSE)
+    updateCheckboxInput(session, "cor_by_group", value = FALSE)
     
     updateRadioButtons(session, "test_type", selected = "independent")
     updateRadioButtons(session, "summary_stat", selected = "mean_sd")
     updateRadioButtons(session, "test_choice", selected = "t.test")
     updateRadioButtons(session, "correlation_type", selected = "pearson")
+    updateRadioButtons(session, "regression_type", selected = "linear")
     
     # Reset select inputs
     updateSelectInput(session, "group_var", choices = c("None"), selected = "None")
     updateSelectInput(session, "id_var", choices = c("None"), selected = "None")
-    updateSelectInput(session, "regression_type", selected = "linear")
-    updateSelectInput(session, "dependent_var", choices = NULL, selected = NULL)
+
+    updateSelectInput(session, "dependent_var", choices = NULL)
+    
+   
+  
     
     # Reset checkbox groups
     updateCheckboxGroupInput(session, "vars", choices = NULL, selected = NULL)
     updateCheckboxGroupInput(session, "continuous_override", choices = NULL, selected = NULL)
     updateCheckboxGroupInput(session, "categorical_override", choices = NULL, selected = NULL)
-    updateCheckboxGroupInput(session, "independent_vars", choices = NULL, selected = NULL)
     updateCheckboxGroupInput(session, "cor_vars", choices = NULL, selected = NULL)
+    updateCheckboxGroupInput(session, "independent_vars", choices = NULL, selected = NULL)
+
     
-    
-    # Reset label inputs
-    vars <- names(dataset())
-    for (var in vars) {
-      updateTextInput(session, 
-                      inputId = paste0("label_", gsub("[^[:alnum:]]", "_", var)), 
-                      value = var)
-    }
-    # Hide any sections that might be shown
+    # Hide sections that might be shown
     shinyjs::hide("override_section")
     shinyjs::hide("label_options_section")
-    
-    # Reset any reactive values if you have them
-    # rv$data <- NULL  # Uncomment and adjust if you're using reactive values
     
     # Clear outputs
     output$data_preview <- renderDT(NULL)
     output$summary_table <- renderTable(NULL)
     output$cor_matrix <- renderTable(NULL)
     output$regression_results <- renderDT(NULL)
+    
+    
+
+    
+    # Show notification
+    showNotification("All selections and outputs have been reset", type = "message")
   })
   
-  # Add these observers to handle file input changes
-  observeEvent(input$file, {
+  # Add this reactive to handle file resets more effectively
+  data <- reactive({
+    input$reset_btn  # Add dependency on reset button
     req(input$file)
     
-    # Update choices for various inputs based on the new data
-    data <- dataset()
-    var_names <- names(data)
+    file_ext <- tools::file_ext(input$file$name)
+    
+    tryCatch({
+      if (file_ext == "csv") {
+        read_csv(input$file$datapath)
+      } else if (file_ext == "xls" || file_ext == "xlsx") {
+        read_excel(input$file$datapath)
+      } else if (file_ext == "sav") {
+        haven::read_sav(input$file$datapath)
+      } else {
+        stop("Unsupported file format.")
+      }
+    }, error = function(e) {
+      showNotification(paste("Error reading file:", e$message), type = "error")
+      NULL
+    })
+  })
+  
+  # Update observers that depend on the dataset
+  observe({
+    req(data())
+    var_names <- names(data())
     
     updateSelectInput(session, "group_var", 
                       choices = c("None", var_names), 
@@ -730,7 +802,7 @@ server <- function(input, output, session) {
     
     updateCheckboxGroupInput(session, "vars", 
                              choices = var_names, 
-                             selected = var_names)
+                             selected = "None")
     
     updateCheckboxGroupInput(session, "continuous_override", 
                              choices = var_names)
@@ -746,34 +818,7 @@ server <- function(input, output, session) {
     
     updateCheckboxGroupInput(session, "cor_vars", 
                              choices = var_names)
-  })
-  
-  # Add a reactive value to track reset state
-  values <- reactiveValues(
-    reset_counter = 0
-  )
-  
-  # Modify the dataset reactive to handle reset
-  dataset <- reactive({
-    req(input$file)
-    values$reset_counter  # Add dependency on reset counter
-    
-    file_ext <- tools::file_ext(input$file$name)
-    
-    tryCatch({
-      if (file_ext == "csv") {
-        read_csv(input$file$datapath)
-      } else if (file_ext == "xls" || file_ext == "xlsx") {
-        read_excel(input$file$datapath)
-      } else if (file_ext == "sav") {
-        haven::read_sav(input$file$datapath)
-      } else {
-        stop("Unsupported file format.")
-      }
-    }, error = function(e) {
-      print(paste("Error reading file:", e$message))
-      NULL
-    })
+   
   })
 }
 # Run the application 
